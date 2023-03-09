@@ -19,10 +19,11 @@ func main() {
 	// )
 	// `)
 
-	parser := parser.NewParser("SELECT count(name, cast) , cast FROM oranges,  apples ")
+	parser := parser.NewParser("SELECT count(name id) , FROM oranges,  apples ")
 	results, err := parser.Parse()
 	if err != nil {
 		fmt.Printf("%v\n", err)
+	} else {
+		fmt.Printf("\nParsed Stmt:\n%v\n", results)
 	}
-	fmt.Printf("\nParsed Stmt:\n%v\n", results)
 }

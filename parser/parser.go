@@ -223,14 +223,14 @@ func (p *Parser) scanFunctions(items []item) ([]SqlFunction, error) {
 		} else if (it.typ == itemFunctionArg || it.typ == itemAsterisk) && canAcceptArg {
 			currFunc.arguments = append(currFunc.arguments, it.val)
 			canAcceptArg = false
+		} else if (it.typ == itemFunctionArg || it.typ == itemAsterisk) && !canAcceptArg {
+			return nil, fmt.Errorf(
+				"Parsing error: Expected comma between arguments near %q at line %d pos %d", it.val, it.line, it.pos)
 		} else if it.typ == itemComma && isinsideFunc {
 			canAcceptArg = true
 		} else if it.typ == itemFunctionClose {
 			results = append(results, currFunc)
 			isinsideFunc = false
-		} else if canAcceptArg && !isinsideFunc {
-			return nil, fmt.Errorf(
-				"Parsing error: Unexpected token %q near %q expected comma at line %d pos %d", it.val, p.lastItem.val, it.line, it.pos)
 		}
 	}
 	return results, nil
@@ -259,9 +259,16 @@ func (p *Parser) labelFunctions(items []item) []item {
 // returns the string representation of column items i.e item.val
 func filterColumnNames(items []item) []string {
 	results := []string{}
+	isInsideFunction := false
 	for _, it := range items {
-		if it.typ == itemIdent || it.typ == itemAsterisk {
+		if it.typ == itemIdent {
 			results = append(results, it.val)
+		} else if it.typ == itemAsterisk && !isInsideFunction {
+			results = append(results, it.val)
+		} else if it.typ == itemFunction {
+			isInsideFunction = true
+		} else if it.typ == itemFunctionClose {
+			isInsideFunction = false
 		}
 	}
 	return results
