@@ -22,12 +22,16 @@ const (
 	// Literals
 	itemIdent       // fields, table_name
 	itemCommand     // sql select, alter
-	itemFunction    // Count etc
 	itemFunctionArg // function arguments Count(a, b)
 
 	// MISC Chars
 	itemAsterisk // *
 	itemComma    // ,
+
+	// special forms
+	itemFunction      // Count(), any itemIdent with ()
+	itemFunctionOpen  // '('
+	itemFunctionClose // ')'
 )
 
 // item represents a token or text string returned from the scanner.
@@ -186,15 +190,7 @@ func lexCommand(l *lexer) stateFn {
 	for {
 		char := l.next()
 		log.Printf("Lex: lexCommand: Curr Char %q\n", char)
-		if char == '(' {
-			l.backup()
-			if l.pos > l.start {
-				l.emit(itemFunction)
-				return lexFunctionArgs // Next state
-			} else {
-				return l.errorf("unexpected charectar '(' ")
-			}
-		} else if isWhitespace(char) {
+		if isWhitespace(char) {
 			log.Println("Lex: lexCommand: whitespace")
 			l.backup()
 			if l.pos > l.start {
@@ -205,7 +201,7 @@ func lexCommand(l *lexer) stateFn {
 			l.ignoreNext()
 		} else if char == eof {
 			return l.errorf("unexpected EOF")
-		} else if !isIdentRune(char) {
+		} else if !isAlphaNumeric(char) {
 			return l.errorf("unexpected charectar %#U", char)
 		}
 	}
@@ -220,7 +216,8 @@ func lexIdent(l *lexer) stateFn {
 			if l.pos > l.start {
 				l.emit(itemIdent)
 			}
-			l.ignoreNext()
+			l.next()
+			l.emit(itemWs)
 		} else if char == ',' {
 			l.backup()
 			if l.pos > l.start {
@@ -233,14 +230,14 @@ func lexIdent(l *lexer) stateFn {
 		} else if char == '(' {
 			l.backup()
 			if l.pos > l.start {
-				l.emit(itemFunction)
-				return lexFunctionArgs // Next state
-			} else {
-				return l.errorf("unexpected charectar '(' ")
+				l.emit(itemIdent)
 			}
+			l.next()
+			l.emit(itemFunctionOpen)
+			return lexFunctionArgs // Next state
 		} else if char == eof {
 			break
-		} else if !isIdentRune(char) {
+		} else if !isAlphaNumeric(char) {
 			return l.errorf("unexpected charectar %#U", char)
 		}
 
@@ -254,8 +251,6 @@ func lexIdent(l *lexer) stateFn {
 }
 
 func lexFunctionArgs(l *lexer) stateFn {
-	// we are sitting on '(' of 'func('
-	l.ignoreNext()
 	// ignore space after bracket 'func(  arg1)'
 	l.ignoreAllWhitespace()
 	for {
@@ -265,7 +260,8 @@ func lexFunctionArgs(l *lexer) stateFn {
 			if l.pos > l.start {
 				l.emit(itemFunctionArg)
 			}
-			l.ignoreNext()
+			l.next()
+			l.emit(itemFunctionClose)
 			return lexIdent
 		} else if char == '*' {
 			l.emit(itemAsterisk)
@@ -284,7 +280,7 @@ func lexFunctionArgs(l *lexer) stateFn {
 			l.ignoreNext()
 		} else if char == eof {
 			return l.errorf("unexpected eof")
-		} else if !isIdentRune(char) {
+		} else if !isAlphaNumeric(char) {
 			return l.errorf("unexpected charectar %#U", char)
 		}
 	}
@@ -299,8 +295,4 @@ func isWhitespace(r rune) bool {
 // isAlphaNumeric reports whether r is an alphabetic, digit, or underscore.
 func isAlphaNumeric(r rune) bool {
 	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
-}
-
-func isIdentRune(r rune) bool {
-	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
 }

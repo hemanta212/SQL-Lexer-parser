@@ -2,12 +2,14 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
+	"log"
 
 	"github.com/hemanta212/parser-lexer-go/parser"
 )
 
 func main() {
-	// log.SetOutput(ioutil.Discard)
+	log.SetOutput(ioutil.Discard)
 	// reader := bytes.NewBufferString("SELECT name, color FROM apples")
 	// "CREATE TABLE some_table(\nname string,\ncast varchar,\nother int)")
 	// CREATE TABLE oranges(
@@ -17,10 +19,10 @@ func main() {
 	// )
 	// `)
 
-	parser := parser.NewParser("Select count( hello , hi hello  )  from appels")
+	parser := parser.NewParser("SELECT count(name, cast) , cast FROM oranges,  apples ")
 	results, err := parser.Parse()
 	if err != nil {
 		fmt.Printf("%v\n", err)
 	}
-	fmt.Printf("%v\n", results)
+	fmt.Printf("\nParsed Stmt:\n%v\n", results)
 }
