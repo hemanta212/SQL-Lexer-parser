@@ -1,134 +1,306 @@
 package parser
 
 import (
-	"bufio"
-	"bytes"
-	"io"
+	"fmt"
 	"log"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
-type Token int
+type itemType int
+type Pos int
+
+var eof = rune(0)
 
 const (
 	// special tokens
-	ILLEGAL Token = iota
-	EOF
-	WS
+	itemError itemType = iota
+	itemEOF
+	itemWs // whitespaces
 
 	// Literals
-	IDENT // fields, table_name
+	itemIdent       // fields, table_name
+	itemCommand     // sql select, alter
+	itemFunction    // Count etc
+	itemFunctionArg // function arguments Count(a, b)
 
 	// MISC Chars
-	ASTERISK // *
-	COMMA    // ,
-
-	// keywords
-	SELECT
-	FROM
+	itemAsterisk // *
+	itemComma    // ,
 )
 
-type Scanner struct {
-	reader *bufio.Reader
+// item represents a token or text string returned from the scanner.
+type item struct {
+	typ  itemType // The type of this item.
+	pos  Pos      // The starting position, in bytes, of this item in the input string.
+	val  string   // The value of this item.
+	line int      // The line number at the start of this item.
 }
 
-func NewScanner(r io.Reader) *Scanner {
-	return &Scanner{
-		reader: bufio.NewReader(r),
+func (i item) String() string {
+	switch {
+	case i.typ == itemEOF:
+		return "EOF"
+	case i.typ == itemError:
+		return i.val
+	case len(i.val) > 15:
+		return fmt.Sprintf("%.10q...", i.val)
 	}
+	return fmt.Sprintf("%q", i.val)
 }
 
-// scan returns the next token and literal value
-func (s *Scanner) scan() (token Token, literal string) {
-	// read the ch rune
-	ch := s.read()
-	log.Println("Lexer: Scanned rune", ch)
+type stateFn func(*lexer) stateFn
 
-	if isWhitespace(ch) {
-		// if we see whitespace consumes all whitespace
-		s.unread()
-		return s.scanWhitespace()
-	} else if isLetter(ch) {
-		// if we see letter we consume it as ident or reserved word
-		log.Println("Lexer: detected letter", ch)
-		s.unread()
-		return s.scanIdent()
-	}
-
-	// otherwise read individual charectars
-	switch ch {
-	case eof:
-		return EOF, ""
-	case '*':
-		return ASTERISK, string(ch)
-	case ',':
-		return COMMA, string(ch)
-	}
-	return ILLEGAL, string(ch)
+type lexer struct {
+	input     string
+	name      string    // the name of the input; used only for error reports
+	pos       Pos       // current position in the input
+	start     Pos       // start position of this item
+	items     chan item // channel of scanned items
+	line      int       // 1+number of newlines seen
+	startLine int       // start line of this item
+	atEOF     bool      // we have hit the end of input and returned eof
 }
 
-// read reads the next rune from the buffered reader
-// returns the rune(0) if and error occurs (or io.EOF is returned)
-func (s *Scanner) read() rune {
-	ch, _, err := s.reader.ReadRune()
-	if err != nil {
-		if err != io.EOF {
-			log.Printf("Warning: err reading rune, sending EOF %v\n", err)
-		}
+// emit passes an item back to the client.
+func (l *lexer) emit(t itemType) {
+	l.items <- item{t, l.start, l.input[l.start:l.pos], l.startLine}
+	l.start = l.pos
+	l.startLine = l.line
+}
+
+// next returns the next rune in the input.
+func (l *lexer) next() rune {
+	if int(l.pos) >= len(l.input) {
+		l.atEOF = true
 		return eof
 	}
-	log.Println("Lexer: read rune", ch)
-	return ch
+	r, w := utf8.DecodeRuneInString(l.input[l.pos:])
+	l.pos += Pos(w)
+	if r == '\n' {
+		l.line++
+	}
+	return r
 }
 
-// unread places the previously read rune back on the reader
-func (s *Scanner) unread() {
-	_ = s.reader.UnreadRune()
+// ignore skips over the pending input before this point.
+func (l *lexer) ignore() {
+	l.line += strings.Count(l.input[l.start:l.pos], "\n")
+	l.start = l.pos
+	l.startLine = l.line
+}
+
+// read and skip the next item
+func (l *lexer) ignoreNext() {
+	l.next()
+	l.ignore()
+}
+
+func (l *lexer) backup() {
+	if !l.atEOF && l.pos > 0 {
+		r, w := utf8.DecodeLastRuneInString(l.input[:l.pos])
+		l.pos -= Pos(w)
+		// Correct newline count.
+		if r == '\n' {
+			l.line--
+		}
+	}
+}
+
+func (l *lexer) peek() rune {
+	runeVal := l.next()
+	l.backup()
+	return runeVal
+}
+
+// accept consumes the next rune if it's from the valid set.
+func (l *lexer) accept(valid string) bool {
+	if strings.ContainsRune(valid, l.next()) {
+		return true
+	}
+	l.backup()
+	return false
 }
 
 // consumes all contiguous whitespaces
-func (s *Scanner) scanWhitespace() (token Token, literal string) {
-	var buf bytes.Buffer
-	for read := s.read(); isWhitespace(read); read = s.read() {
-		buf.WriteRune(read)
+func (l *lexer) ignoreAllWhitespace() {
+	for {
+		char := l.peek()
+		if isWhitespace(char) {
+			l.ignoreNext()
+		} else {
+			break
+		}
 	}
-	s.unread()
-	log.Printf("Lexer: ScanWhitespace: Scanned %q", buf.String())
-	return WS, buf.String()
 }
 
-// consumes all contiguous ident runes
-func (s *Scanner) scanIdent() (token Token, literal string) {
-	var buf bytes.Buffer
-	for read := s.read(); isIdentRune(read); read = s.read() {
-		buf.WriteRune(read)
+// errorf returns an error token and terminates the scan by passing
+// back a nil pointer that will be the next state, terminating l.nextItem.
+func (l *lexer) errorf(format string, args ...any) stateFn {
+	l.items <- item{itemError, l.start, fmt.Sprintf(format, args...), l.startLine}
+	return nil
+}
+
+// nextItem returns the next item from the input.
+// Called by the parser, not in the lexing goroutine.
+func (l *lexer) nextItem() item {
+	return <-l.items
+}
+
+// drain drains the output so the lexing goroutine will exit.
+// Called by the parser, not in the lexing goroutine.
+func (l *lexer) drain() {
+	for range l.items {
 	}
-	s.unread()
+}
 
-	literal = buf.String()
-	log.Println("Lexer: ScanIndent: Scanned", literal)
-	switch literal {
-	case "SELECT":
-		return SELECT, literal
-	case "FROM":
-		return FROM, literal
+// lex creates a new scanner for the input string.
+func lex(name, input string) *lexer {
+	log.Printf("Lexer: lex: Input %q\n", input)
+	s := &lexer{
+		input:     input,
+		name:      name,
+		atEOF:     false,
+		items:     make(chan item),
+		line:      1,
+		startLine: 1,
 	}
-	return IDENT, literal
+	go s.run()
+	return s
 }
 
-func isWhitespace(ch rune) bool {
-	return ch == ' ' || ch == '\t' || ch == '\n'
+func (l *lexer) run() {
+	for state := lexCommand; state != nil; {
+		state = state(l)
+		if state == nil {
+			log.Println("lex: run: got nil state exiting")
+		}
+	}
+	close(l.items)
 }
 
-func isLetter(ch rune) bool {
-	return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
+// State functions
+
+func lexCommand(l *lexer) stateFn {
+	for {
+		char := l.next()
+		log.Printf("Lex: lexCommand: Curr Char %q\n", char)
+		if char == '(' {
+			l.backup()
+			if l.pos > l.start {
+				l.emit(itemFunction)
+				return lexFunctionArgs // Next state
+			} else {
+				return l.errorf("unexpected charectar '(' ")
+			}
+		} else if isWhitespace(char) {
+			log.Println("Lex: lexCommand: whitespace")
+			l.backup()
+			if l.pos > l.start {
+				log.Printf("Lex: lexCommand: emitting @ %q\n", char)
+				l.emit(itemIdent)
+				return lexIdent
+			}
+			l.ignoreNext()
+		} else if char == eof {
+			return l.errorf("unexpected EOF")
+		} else if !isIdentRune(char) {
+			return l.errorf("unexpected charectar %#U", char)
+		}
+	}
 }
 
-func isDigit(ch rune) bool {
-	return (ch >= '0' && ch <= '9')
+func lexIdent(l *lexer) stateFn {
+	l.ignoreAllWhitespace()
+	for {
+		char := l.next()
+		if isWhitespace(char) {
+			l.backup()
+			if l.pos > l.start {
+				l.emit(itemIdent)
+			}
+			l.ignoreNext()
+		} else if char == ',' {
+			l.backup()
+			if l.pos > l.start {
+				l.emit(itemIdent)
+			}
+			l.next()
+			l.emit(itemComma)
+		} else if char == '*' {
+			l.emit(itemAsterisk)
+		} else if char == '(' {
+			l.backup()
+			if l.pos > l.start {
+				l.emit(itemFunction)
+				return lexFunctionArgs // Next state
+			} else {
+				return l.errorf("unexpected charectar '(' ")
+			}
+		} else if char == eof {
+			break
+		} else if !isIdentRune(char) {
+			return l.errorf("unexpected charectar %#U", char)
+		}
+
+	}
+	// correctly reached EOF.
+	if l.pos > l.start {
+		l.emit(itemIdent)
+	}
+	l.emit(itemEOF)
+	return nil
 }
 
-func isIdentRune(ch rune) bool {
-	return isLetter(ch) || isDigit(ch) || ch == '_'
+func lexFunctionArgs(l *lexer) stateFn {
+	// we are sitting on '(' of 'func('
+	l.ignoreNext()
+	// ignore space after bracket 'func(  arg1)'
+	l.ignoreAllWhitespace()
+	for {
+		char := l.next()
+		if char == ')' {
+			l.backup()
+			if l.pos > l.start {
+				l.emit(itemFunctionArg)
+			}
+			l.ignoreNext()
+			return lexIdent
+		} else if char == '*' {
+			l.emit(itemAsterisk)
+		} else if char == ',' {
+			l.backup()
+			if l.pos > l.start {
+				l.emit(itemFunctionArg)
+			}
+			l.next()
+			l.emit(itemComma)
+		} else if isWhitespace(char) {
+			l.backup()
+			if l.pos > l.start {
+				l.emit(itemFunctionArg)
+			}
+			l.ignoreNext()
+		} else if char == eof {
+			return l.errorf("unexpected eof")
+		} else if !isIdentRune(char) {
+			return l.errorf("unexpected charectar %#U", char)
+		}
+	}
 }
 
-var eof = rune(0)
+// isWhiteSpace reports whether r is a space character.
+func isWhitespace(r rune) bool {
+	log.Printf("Lex: isWhitespace: got rune %q\n", r)
+	return r == ' ' || r == '\t' || r == '\r' || r == '\n'
+}
+
+// isAlphaNumeric reports whether r is an alphabetic, digit, or underscore.
+func isAlphaNumeric(r rune) bool {
+	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+func isIdentRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
+}

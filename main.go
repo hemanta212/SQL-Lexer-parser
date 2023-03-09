@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 
 	"github.com/hemanta212/parser-lexer-go/parser"
@@ -9,11 +8,19 @@ import (
 
 func main() {
 	// log.SetOutput(ioutil.Discard)
-	reader := bytes.NewBufferString("SELECT COUNT(*) FROM apples")
-	parser := parser.NewParser(reader)
-	stmt, err := parser.Parse()
+	// reader := bytes.NewBufferString("SELECT name, color FROM apples")
+	// "CREATE TABLE some_table(\nname string,\ncast varchar,\nother int)")
+	// CREATE TABLE oranges(
+	//         id integer primary key autoincrement,
+	//         name text,
+	//         description text
+	// )
+	// `)
+
+	parser := parser.NewParser("Select count( hello , hi hello  )  from appels")
+	results, err := parser.Parse()
 	if err != nil {
 		fmt.Printf("%v\n", err)
 	}
-	fmt.Printf("%v\n", stmt)
+	fmt.Printf("%v\n", results)
 }
