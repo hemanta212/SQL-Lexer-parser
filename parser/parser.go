@@ -109,10 +109,19 @@ func (p *Parser) prepareSelectStatement(items []item) (*SelectStmt, error) {
 }
 
 func (p *Parser) prepareCreateStatement(items []item) (*CreateStmt, error) {
+	if items[0].val != "table" {
+		return nil, fmt.Errorf("Parser Error: Not implemented.")
+	}
+	function, err := p.scanCreateTableFunction(items[1:])
+	if err != nil {
+		return nil, err
+	}
+	tableName := function.name
+
 	return &CreateStmt{
 		command:   "create",
-		tableName: "",
-		function:  SqlCreateFunction{},
+		tableName: tableName,
+		function:  function,
 	}, nil
 }
 
@@ -225,7 +234,7 @@ func (p *Parser) scanFunctions(items []item) ([]SqlFunction, error) {
 			canAcceptArg = false
 		} else if (it.typ == itemFunctionArg || it.typ == itemAsterisk) && !canAcceptArg {
 			return nil, fmt.Errorf(
-				"Parsing error: Expected comma between arguments near %q at line %d pos %d", it.val, it.line, it.pos)
+				"Parsing error: Missing comma between arguments near %q at line %d pos %d", it.val, it.line, it.pos)
 		} else if it.typ == itemComma && isinsideFunc {
 			canAcceptArg = true
 		} else if it.typ == itemFunctionClose {
@@ -234,6 +243,35 @@ func (p *Parser) scanFunctions(items []item) ([]SqlFunction, error) {
 		}
 	}
 	return results, nil
+}
+
+func (p *Parser) scanCreateTableFunction(items []item) (SqlCreateFunction, error) {
+	function := SqlCreateFunction{}
+	// comma control; are we ready to accept new arg, happens at first and after every comma
+	canAcceptArg := true
+	// currently reading datatype or not
+	isReadingDatatype := false
+	currentArgument := DatatypeArgument{}
+	for _, it := range items {
+		if it.typ == itemIdent {
+			function.name = it.val
+		} else if it.typ == itemFunctionArg && canAcceptArg {
+			currentArgument.name = it.val
+			canAcceptArg, isReadingDatatype = false, true
+		} else if it.typ == itemFunctionArg && isReadingDatatype {
+			currentArgument.datatype = append(currentArgument.datatype, it.val)
+		} else if it.typ == itemComma {
+			function.arguments = append(function.arguments, currentArgument)
+			currentArgument = DatatypeArgument{}
+			canAcceptArg, isReadingDatatype = true, false
+		} else if it.typ == itemEOF {
+			if isReadingDatatype {
+				function.arguments = append(function.arguments, currentArgument)
+			}
+			break
+		}
+	}
+	return function, nil
 }
 
 func (p *Parser) labelFunctions(items []item) []item {
