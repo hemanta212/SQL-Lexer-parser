@@ -1,0 +1,73 @@
+* Basic SQL Lexer/Parser
+
+This is a very rudimentry sql lexing and parsing logic for use in [[https://github.com/hemanta212/codecrafters-sqlite-go][sqlite toy implementation project]].
+
+Lexing technique is inspired by the [[https://www.youtube.com/watch?v=HxaD_trXwRE][Talk of Rob Pike on Lexing]] on go html/templating std lib
+
+** Examples:
+
+
+#+begin_src shell :exports both :results output
+go run main.go
+#+end_src
+
+#+RESULTS:
+#+begin_example
+Scanning SQL:
+
+	CREATE TABLE oranges
+(
+       id integer primary key autoincrement,
+       name text,
+       description text
+)
+
+
+Parsed Stmt:
+&{create oranges {oranges [{id [integer primary key autoincrement]} {name [text]} {description [text]}]}}
+#+end_example
+
+
+#+begin_src shell :exports both :results output
+go run main.go
+#+end_src
+
+#+RESULTS:
+: Scanning SQL:
+:  SELECT name, oranges from apples
+:
+: Parsed Stmt:
+: &{select [name oranges] [apples] []}
+
+
+#+begin_src shell :exports both :results output
+go run main.go
+#+end_src
+
+#+RESULTS:
+: Scanning SQL:
+:  SELECT Count(name, oranges) from apples
+:
+: Parsed Stmt:
+: &{select [] [apples] [{count [name oranges]}]}
+
+
+** Reporting Errors
+
+#+begin_src shell :exports both :results output
+go run main.go
+#+end_src
+
+#+RESULTS:
+: Scanning SQL:
+:  SELECT name, from apples
+: Parsing error: Unexpected trailing comma near "from" at line 1 pos 13
+
+#+begin_src shell :exports both :results output
+go run main.go
+#+end_src
+
+#+RESULTS:
+: Scanning SQL:
+:  SELECT COUNT(name id) from apples
+: Parsing error: Missing comma between arguments near "id" at line 1 pos 18

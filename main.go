@@ -2,12 +2,14 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
+	"log"
 
 	"github.com/hemanta212/parser-lexer-go/parser"
 )
 
 func main() {
-	// log.SetOutput(ioutil.Discard)
+	log.SetOutput(ioutil.Discard)
 
 	parser := parser.NewParser(`
 	CREATE TABLE oranges
