@@ -6,8 +6,9 @@ Lexing technique is inspired by the [[https://www.youtube.com/watch?v=HxaD_trXwR
 
 ** Examples:
 
+*Create Table*
 
-#+begin_src shell :exports both :results output
+#+begin_src shell :exports both :results output :wrap example
 go run main.go
 #+end_src
 
@@ -28,46 +29,58 @@ Parsed Stmt:
 #+end_example
 
 
-#+begin_src shell :exports both :results output
+*Select statement*
+
+#+begin_src shell :exports both :results output :wrap example
 go run main.go
 #+end_src
 
 #+RESULTS:
-: Scanning SQL:
-:  SELECT name, oranges from apples
-:
-: Parsed Stmt:
-: &{select [name oranges] [apples] []}
+#+begin_example
+Scanning SQL:
+ SELECT name, id from apples
+
+Parsed Stmt:
+&{select [name id] [apples] []}
+#+end_example
 
 
-#+begin_src shell :exports both :results output
+*Select statement with functions*
+
+#+begin_src shell :exports both :results output :wrap example
 go run main.go
 #+end_src
 
 #+RESULTS:
-: Scanning SQL:
-:  SELECT Count(name, oranges) from apples
-:
-: Parsed Stmt:
-: &{select [] [apples] [{count [name oranges]}]}
+#+begin_example
+Scanning SQL:
+ SELECT Count(*) from apples, oranges
+
+Parsed Stmt:
+&{select [] [apples oranges] [{count [*]}]}
+#+end_example
 
 
 ** Reporting Errors
 
-#+begin_src shell :exports both :results output
+#+begin_src shell :exports both :results output :wrap example
 go run main.go
 #+end_src
 
 #+RESULTS:
-: Scanning SQL:
-:  SELECT name, from apples
-: Parsing error: Unexpected trailing comma near "from" at line 1 pos 13
+#+begin_example
+Scanning SQL:
+ SELECT name, id, from apples, oranges
+Parsing error: Unexpected trailing comma near "from" at line 1 pos 17
+#+end_example
 
-#+begin_src shell :exports both :results output
+#+begin_src shell :exports both :results output :wrap example
 go run main.go
 #+end_src
 
 #+RESULTS:
-: Scanning SQL:
-:  SELECT COUNT(name id) from apples
-: Parsing error: Missing comma between arguments near "id" at line 1 pos 18
+#+begin_example
+Scanning SQL:
+ SELECT Count(name id) from apples, oranges
+Parsing error: Missing comma between arguments near "id" at line 1 pos 18
+#+end_example
